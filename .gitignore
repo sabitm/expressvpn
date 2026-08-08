@@ -17,3 +17,4 @@ Temporary Items
 .apdisk
 *.icloudls
 AGENTS.md
+/__pycache__

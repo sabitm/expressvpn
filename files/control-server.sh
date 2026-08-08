@@ -7,6 +7,8 @@ set -euo pipefail
 CONTROL_PORT="${CONTROL_PORT:-8000}"
 CONTROL_IP="${CONTROL_IP:-0.0.0.0}"
 AUTH_CONFIG="${AUTH_CONFIG:-/expressvpn/config.toml}"
+CONTROL_CORS="${CONTROL_CORS:-on}"
+CONTROL_CORS_ORIGIN="${CONTROL_CORS_ORIGIN:-*}"
 
 declare -a ROLE_NAMES=()
 declare -a ROLE_AUTH_TYPES=()
@@ -41,6 +43,11 @@ http_response() {
     printf 'Connection: close\r\n'
     if [[ -n "$extra_headers" ]]; then
         printf '%s\r\n' "$extra_headers"
+    fi
+    if [[ "$CONTROL_CORS" == "on" ]]; then
+        printf 'Access-Control-Allow-Origin: %s\r\n' "$CONTROL_CORS_ORIGIN"
+        printf 'Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n'
+        printf 'Access-Control-Allow-Headers: Content-Type, Authorization, X-API-Key\r\n'
     fi
     printf '\r\n%s' "$body"
 }
@@ -604,15 +611,21 @@ handle_http_request() {
     local path="${full_path%%\?*}"
     [[ -z "$path" ]] && path="/"
 
+    local method_upper
+    method_upper=$(uppercase "$method")
+
+    # Preflight bypasses auth and returns CORS headers with no body.
+    if [[ "$method_upper" == "OPTIONS" && "$CONTROL_CORS" == "on" ]]; then
+        http_response "204 No Content" "text/plain" "" ""
+        return
+    fi
+
     if ! check_auth "$auth_header" "$api_key_header" "$method" "$path"; then
         local error_body
         error_body=$(jq -n --arg error "$AUTH_FAILURE_MESSAGE" '{error: $error}')
         http_response "$AUTH_FAILURE_STATUS" "application/json" "$error_body" "$AUTH_FAILURE_HEADER"
         return
     fi
-
-    local method_upper
-    method_upper=$(uppercase "$method")
 
     case "${method_upper} $path" in
         "GET /v1/status")

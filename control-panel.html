@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ExpressVPN Control Panel</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1f232c; --txt:#e6e9ef; --muted:#9aa4b2;
+    --line:#2a2f3a; --accent:#4f8cff; --green:#3fb950; --red:#f85149; --amber:#d29922;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--sans);background:var(--bg);color:var(--txt);font-size:14px;line-height:1.45}
+  header{position:sticky;top:0;z-index:5;background:var(--panel);border-bottom:1px solid var(--line);padding:10px 16px}
+  header h1{font-size:15px;margin:0 0 8px;font-weight:600}
+  .conn{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  label{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:12px}
+  input,select{background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit;min-width:0}
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:6px 12px;font:inherit;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  button:disabled{opacity:.5;cursor:default}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.danger{border-color:var(--red);color:var(--red)}
+  .badge{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+  .dot.ok{background:var(--green)} .dot.bad{background:var(--red)} .dot.warn{background:var(--amber)}
+  main{padding:16px;max-width:1200px;margin:0 auto}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+  article{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  article h2{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 10px;font-weight:600}
+  .row{display:flex;justify-content:space-between;gap:10px;padding:3px 0;align-items:baseline}
+  .row .k{color:var(--muted)} .row .v{font-family:var(--mono);text-align:right;word-break:break-all}
+  pre{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;overflow:auto;font-family:var(--mono);font-size:12px;margin:8px 0 0;white-space:pre-wrap;word-break:break-all}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px}
+  .grow{flex:1;min-width:140px}
+  .err{color:var(--red);font-size:12px;margin-top:6px;min-height:0}
+  .note{color:var(--muted);font-size:12px}
+  .msg{font-size:12px;margin-top:6px;min-height:0}
+  ul{margin:0;padding-left:18px}
+  ul li{font-family:var(--mono);font-size:12px}
+  details.raw>summary{cursor:pointer;color:var(--muted);font-size:12px}
+  code{font-family:var(--mono);background:var(--bg);padding:1px 4px;border-radius:4px}
+</style>
+</head>
+<body>
+<header>
+  <h1>ExpressVPN Control</h1>
+  <div class="conn">
+    <label>Base URL <input id="baseUrl" value="http://localhost:8000" size="26" spellcheck="false"></label>
+    <label>Auto-refresh (s, 0=off) <input id="interval" type="number" value="5" min="0" size="3"></label>
+    <button id="apply" class="primary">Apply</button>
+    <button id="refreshAll">Refresh all</button>
+    <span id="health" class="badge"><span class="dot warn"></span>API: ?</span>
+  </div>
+</header>
+
+<main>
+  <div class="grid">
+
+    <article>
+      <h2>Status</h2>
+      <div class="row"><span class="k">State</span><span id="connected" class="badge"><span class="dot warn"></span>?</span></div>
+      <div class="row"><span class="k">Server</span><span id="stServer" class="v">-</span></div>
+      <div class="row"><span class="k">VPN IP</span><span id="stIp" class="v">-</span></div>
+      <details class="raw"><summary>raw status</summary><pre id="stRaw">-</pre></details>
+      <div id="statusErr" class="err"></div>
+    </article>
+
+    <article>
+      <h2>Connection</h2>
+      <div class="controls">
+        <input id="serverInput" class="grow" list="serverList" value="smart" placeholder="region id or smart" spellcheck="false">
+        <button id="connectBtn" class="primary">Connect</button>
+        <button id="disconnectBtn" class="danger">Disconnect</button>
+      </div>
+      <datalist id="serverList"></datalist>
+      <div id="connectMsg" class="msg"></div>
+      <div class="row" style="margin-top:8px"><span class="k">VPN service</span><span id="vpnStatus" class="badge"><span class="dot warn"></span>?</span></div>
+    </article>
+
+    <article>
+      <h2>VPN settings</h2>
+      <div class="row"><label class="k" for="proto">Protocol</label>
+        <select id="proto">
+          <option value="auto">auto</option>
+          <option value="lightwayudp">lightwayudp</option>
+          <option value="lightwaytcp">lightwaytcp</option>
+          <option value="openvpnudp">openvpnudp</option>
+          <option value="openvpntcp">openvpntcp</option>
+          <option value="wireguard">wireguard</option>
+        </select>
+      </div>
+      <div class="row"><label class="k" for="region">Region</label><input id="region" class="grow" list="serverList" spellcheck="false"></div>
+      <div class="row"><span class="k">Allow LAN</span><label><input type="checkbox" id="allowlan"> allow_lan</label></div>
+      <div class="controls"><button id="saveSettings" class="primary">Save settings</button></div>
+      <div id="settingsMsg" class="msg"></div>
+      <div id="settingsErr" class="err"></div>
+    </article>
+
+    <article>
+      <h2>Public IP</h2>
+      <div class="row"><span class="k">IP</span><span id="ipAddr" class="v">-</span></div>
+      <div class="row"><span class="k">Country</span><span id="ipCountry" class="v">-</span></div>
+      <div class="row"><span class="k">City</span><span id="ipCity" class="v">-</span></div>
+      <div class="row"><span class="k">Organization</span><span id="ipOrg" class="v">-</span></div>
+      <div class="row"><span class="k">Checked</span><span id="ipTs" class="v">-</span></div>
+      <div id="ipErr" class="err"></div>
+    </article>
+
+    <article>
+      <h2>DNS</h2>
+      <div class="row"><span class="k">Resolver</span><span id="dnsStatus" class="badge"><span class="dot warn"></span>?</span></div>
+      <div class="row" style="align-items:flex-start"><span class="k">Servers</span><ul id="dnsServers"><li class="note">-</li></ul></div>
+      <details class="raw"><summary>resolv.conf</summary><pre id="dnsResolv">-</pre></details>
+      <div id="dnsErr" class="err"></div>
+    </article>
+
+    <article>
+      <h2>DNS leak test</h2>
+      <div class="controls"><button id="dnsleakBtn">Run leak test</button><span class="note">~30s</span></div>
+      <div id="dnsleakConclusion" class="msg"></div>
+      <details class="raw"><summary>result</summary><pre id="dnsleakOut">-</pre></details>
+    </article>
+
+    <article>
+      <h2>Speed test</h2>
+      <div class="controls"><button id="speedBtn">Run speed test</button><span class="note">up to ~120s</span></div>
+      <details class="raw"><summary>result</summary><pre id="speedOut">-</pre></details>
+    </article>
+
+    <article>
+      <h2>API health</h2>
+      <div class="row"><span class="k">Status</span><span id="healthBadge" class="badge"><span class="dot warn"></span>?</span></div>
+      <div class="row"><span class="k">Timestamp</span><span id="healthTs" class="v">-</span></div>
+    </article>
+
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const LS = window.localStorage;
+let baseUrl = (LS.getItem('baseUrl') || 'http://localhost:8000').replace(/\/+$/, '');
+let interval = Math.max(0, parseInt(LS.getItem('interval') || '5', 10) || 0);
+let timer = null;
+let serverPrefilled = false;
+
+$('baseUrl').value = baseUrl;
+$('interval').value = interval;
+
+async function api(path, opts = {}) {
+  let res;
+  try {
+    res = await fetch(baseUrl + path, {
+      method: opts.method || 'GET',
+      headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+  } catch (netErr) {
+    throw new Error('Network request failed (API unreachable)');
+  }
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : null; }
+  catch { data = { raw: text }; }
+  if (!res.ok) {
+    const err = new Error(res.status + ' ' + res.statusText + (data && data.error ? ': ' + data.error : ''));
+    err.status = res.status; err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+function fmt(v) { return (v === undefined || v === null || v === '') ? '-' : String(v); }
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+function pre(obj) { return '<pre>' + escapeHtml(JSON.stringify(obj, null, 2)) + '<\/pre>'; }
+function setBadge(elId, ok, okText, badText) {
+  const el = $(elId);
+  el.className = 'badge';
+  el.innerHTML = '<span class="dot ' + (ok ? 'ok' : 'bad') + '"><\/span>' + (ok ? okText : badText);
+}
+function setErr(id, msg) {
+  const el = $(id + 'Err');
+  if (el) el.textContent = msg ? ('Error: ' + msg) : '';
+}
+function setResult(id, msg) {
+  const el = $(id);
+  if (el) el.textContent = msg || '';
+}
+
+async function loadStatus() {
+  try {
+    const d = await api('/v1/status');
+    setBadge('connected', d.connected === true, 'Connected', 'Disconnected');
+    $('stServer').textContent = fmt(d.server);
+    $('stIp').textContent = fmt(d.ip);
+    $('stRaw').textContent = fmt(d.status);
+    setErr('status', '');
+  } catch (e) {
+    setBadge('connected', false, 'Connected', 'Disconnected');
+    setErr('status', e.message);
+  }
+}
+
+async function loadVpnStatus() {
+  try {
+    const d = await api('/v1/vpn/status');
+    setBadge('vpnStatus', d.status === 'running', 'VPN: running', 'VPN: stopped');
+    setErr('vpn', '');
+  } catch (e) {
+    setBadge('vpnStatus', false, 'VPN: running', 'VPN: stopped');
+    setErr('vpn', e.message);
+  }
+}
+
+async function loadSettings() {
+  try {
+    const d = await api('/v1/vpn/settings');
+    $('proto').value = d.protocol || 'auto';
+    $('region').value = d.region || '';
+    $('allowlan').checked = String(d.allow_lan).toLowerCase() === 'true';
+    if (!serverPrefilled) { $('serverInput').value = d.region || 'smart'; serverPrefilled = true; }
+    setErr('settings', '');
+  } catch (e) {
+    setErr('settings', e.message);
+  }
+}
+
+async function loadIp() {
+  try {
+    const d = await api('/v1/ip');
+    $('ipAddr').textContent = fmt(d.ip);
+    $('ipCountry').textContent = fmt(d.country);
+    $('ipCity').textContent = fmt(d.city);
+    $('ipOrg').textContent = fmt(d.organization);
+    $('ipTs').textContent = fmt(d.timestamp);
+    setErr('ip', '');
+  } catch (e) {
+    setErr('ip', e.message);
+  }
+}
+
+async function loadDns() {
+  try {
+    const d = await api('/v1/dns');
+    const arr = (d.dns_servers && d.dns_servers.length) ? d.dns_servers : [];
+    $('dnsServers').innerHTML = arr.length
+      ? arr.map(s => '<li>' + escapeHtml(s) + '<\/li>').join('')
+      : '<li class="note">none<\/li>';
+    $('dnsResolv').textContent = d.resolv_conf || '';
+    setErr('dns', '');
+    try {
+      const s = await api('/v1/dns/status');
+      setBadge('dnsStatus', s.status === 'running', 'DNS: running', 'DNS: stopped');
+    } catch {
+      setBadge('dnsStatus', false, 'DNS: running', 'DNS: stopped');
+    }
+  } catch (e) {
+    setErr('dns', e.message);
+    setBadge('dnsStatus', false, 'DNS: running', 'DNS: stopped');
+  }
+}
+
+async function loadHealth() {
+  try {
+    const d = await api('/v1/health');
+    setBadge('health', d.status === 'ok', 'API: healthy', 'API: unhealthy');
+    setBadge('healthBadge', d.status === 'ok', 'ok', 'error');
+    $('healthTs').textContent = fmt(d.timestamp);
+    setErr('health', '');
+  } catch (e) {
+    setBadge('health', false, 'API: healthy', 'API: unreachable');
+    setBadge('healthBadge', false, 'ok', 'error');
+    $('healthTs').textContent = '-';
+    setErr('health', e.message);
+  }
+}
+
+async function loadServers() {
+  try {
+    const d = await api('/v1/servers');
+    const arr = Array.isArray(d) ? d : [];
+    $('serverList').innerHTML = arr.map(s => '<option value="' + escapeHtml(s) + '"><\/option>').join('');
+  } catch {
+    /* non-fatal; datalist just stays empty */
+  }
+}
+
+// Auto-refresh only the cheap, non-clobbering endpoints so form edits are not overwritten.
+function refreshLight() {
+  return Promise.allSettled([loadStatus(), loadVpnStatus(), loadIp(), loadDns(), loadHealth()]);
+}
+function refreshAll() {
+  return Promise.allSettled([loadStatus(), loadVpnStatus(), loadIp(), loadDns(), loadHealth(), loadSettings(), loadServers()]);
+}
+
+$('connectBtn').onclick = async () => {
+  const server = $('serverInput').value.trim() || 'smart';
+  $('connectBtn').disabled = true;
+  setResult('connectMsg', 'connecting...');
+  try {
+    const d = await api('/v1/connect', { method: 'POST', body: { server } });
+    setResult('connectMsg', (d.success ? 'Connected: ' + fmt(d.server) : 'Failed') + (d.message ? ' - ' + d.message : ''));
+    refreshLight();
+  } catch (e) {
+    setResult('connectMsg', 'Error: ' + e.message);
+  } finally {
+    $('connectBtn').disabled = false;
+  }
+};
+
+$('disconnectBtn').onclick = async () => {
+  $('disconnectBtn').disabled = true;
+  setResult('connectMsg', 'disconnecting...');
+  try {
+    const d = await api('/v1/disconnect', { method: 'POST' });
+    setResult('connectMsg', (d.success ? 'Disconnected' : 'Disconnect failed') + (d.message ? ' - ' + d.message : ''));
+    refreshLight();
+  } catch (e) {
+    setResult('connectMsg', 'Error: ' + e.message);
+  } finally {
+    $('disconnectBtn').disabled = false;
+  }
+};
+
+$('saveSettings').onclick = async () => {
+  const body = {
+    protocol: $('proto').value,
+    region: $('region').value.trim() || 'smart',
+    allow_lan: $('allowlan').checked,
+  };
+  $('saveSettings').disabled = true;
+  setResult('settingsMsg', 'saving...');
+  try {
+    const d = await api('/v1/vpn/settings', { method: 'POST', body });
+    setResult('settingsMsg', d.success
+      ? 'Saved (' + (d.applied ? d.applied.join(', ') : '') + ')' + (d.region ? ' - ' + d.region : '')
+      : 'Failed: ' + (d.error || (d.errors ? d.errors.join(', ') : 'unknown')));
+    loadSettings();
+    refreshLight();
+  } catch (e) {
+    if (e.data) {
+      setResult('settingsMsg', 'Failed: ' + (e.data.error || (e.data.errors ? e.data.errors.join(', ') : e.message)));
+    } else {
+      setResult('settingsMsg', 'Error: ' + e.message);
+    }
+  } finally {
+    $('saveSettings').disabled = false;
+  }
+};
+
+$('dnsleakBtn').onclick = async () => {
+  $('dnsleakBtn').disabled = true;
+  $('dnsleakOut').textContent = 'running (up to ~30s)...';
+  setResult('dnsleakConclusion', '');
+  try {
+    const d = await api('/v1/dnsleak');
+    setResult('dnsleakConclusion', d.conclusion ? 'Conclusion: ' + d.conclusion : (d.error ? 'Error: ' + d.error : ''));
+    $('dnsleakOut').innerHTML = pre(d);
+  } catch (e) {
+    $('dnsleakOut').textContent = 'Error: ' + e.message;
+  } finally {
+    $('dnsleakBtn').disabled = false;
+  }
+};
+
+$('speedBtn').onclick = async () => {
+  $('speedBtn').disabled = true;
+  $('speedOut').textContent = 'running (up to ~120s)...';
+  try {
+    const d = await api('/v1/speedtest');
+    $('speedOut').innerHTML = pre(d);
+  } catch (e) {
+    $('speedOut').textContent = 'Error: ' + e.message;
+  } finally {
+    $('speedBtn').disabled = false;
+  }
+};
+
+$('refreshAll').onclick = () => refreshAll();
+
+$('apply').onclick = () => {
+  baseUrl = ($('baseUrl').value.trim() || 'http://localhost:8000').replace(/\/+$/, '');
+  interval = Math.max(0, parseInt($('interval').value || '0', 10) || 0);
+  LS.setItem('baseUrl', baseUrl);
+  LS.setItem('interval', String(interval));
+  $('baseUrl').value = baseUrl;
+  $('interval').value = interval;
+  startTimer();
+  refreshAll();
+};
+
+function startTimer() {
+  if (timer) { clearInterval(timer); timer = null; }
+  if (interval > 0) timer = setInterval(refreshLight, interval * 1000);
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  startTimer();
+  loadServers();
+  refreshAll();
+});
+</script>
+</body>
+</html>
