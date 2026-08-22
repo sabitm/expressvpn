@@ -18,3 +18,4 @@ Temporary Items
 *.icloudls
 AGENTS.md
 /__pycache__
+/.env
